@@ -23,7 +23,7 @@ function Podium({ rows }: { rows: WealthRankRow[] }) {
         <div key={row.pwikitId} className={cls}>
           <Avatar name={row.name} url={row.avatarUrl} size={size} />
           <p>
-            <a href={`/-/users/${row.pwikitId}`}>{row.name}</a>
+            <a href={`/-/users/${encodeURIComponent(row.name)}`}>{row.name}</a>
           </p>
           <em className="sc-num">{formatNumber(row.coins)}</em>
           <div className="step">{row.rank}</div>

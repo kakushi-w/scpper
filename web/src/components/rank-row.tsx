@@ -8,7 +8,7 @@ export function RankRow({ row, me }: { row: WealthRankRow; me?: boolean }) {
       <span className="rk sc-num">{row.rank}</span>
       <Avatar name={row.name} url={row.avatarUrl} size={36} />
       <span className="nm">
-        <a href={`/-/users/${row.pwikitId}`}>{row.name}</a>
+        <a href={`/-/users/${encodeURIComponent(row.name)}`}>{row.name}</a>
       </span>
       <span className="sc sc-num">{formatNumber(row.coins)}</span>
     </div>
