@@ -84,7 +84,7 @@ func (s *Server) handleStockSymbols(w http.ResponseWriter, r *http.Request) erro
 		_ = s.db.QueryRow(ctx, `
 			SELECT COALESCE(SUM(qty),0) FROM stock_trades
 			WHERE symbol = $1
-			  AND at >= date_trunc('day', now() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai'
+			  AND at >= date_trunc('day', now() AT TIME ZONE INTERVAL '+08:00') AT TIME ZONE INTERVAL '+08:00'
 			  AND side = taker_side`, sym.Code).Scan(&it.DayVolume)
 		if it.DayOpen > 0 {
 			it.ChangePct = round2((it.Price/it.DayOpen - 1) * 100)
@@ -107,7 +107,7 @@ func prevClose(ctx context.Context, s *Server, symbol string) float64 {
 	_ = s.db.QueryRow(ctx, `
 		SELECT close FROM stock_ticks
 		WHERE symbol = $1
-		  AND at < date_trunc('day', now() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai'
+		  AND at < date_trunc('day', now() AT TIME ZONE INTERVAL '+08:00') AT TIME ZONE INTERVAL '+08:00'
 		ORDER BY at DESC LIMIT 1`, symbol).Scan(&v)
 	return v
 }
@@ -141,7 +141,7 @@ func (s *Server) handleStockQuote(w http.ResponseWriter, r *http.Request) error 
 	_ = s.db.QueryRow(ctx, `
 		SELECT COALESCE(SUM(qty),0) FROM stock_trades
 		WHERE symbol = $1 AND side = taker_side
-		  AND at >= date_trunc('day', now() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai'`,
+		  AND at >= date_trunc('day', now() AT TIME ZONE INTERVAL '+08:00') AT TIME ZONE INTERVAL '+08:00'`,
 		m.Code).Scan(&dayVolume)
 
 	var pendOrders int
@@ -280,7 +280,7 @@ func (s *Server) handleStockCandles(w http.ResponseWriter, r *http.Request) erro
 		}
 		rows, err = s.db.Query(ctx, `
 			SELECT d, o, h, l, c, v FROM (
-				SELECT date_trunc($1, at AT TIME ZONE 'Asia/Shanghai')::date AS d,
+				SELECT date_trunc($1, at AT TIME ZONE INTERVAL '+08:00')::date AS d,
 				       (array_agg(open  ORDER BY at))[1]                  AS o,
 				       MAX(high)                                          AS h,
 				       MIN(low)                                           AS l,

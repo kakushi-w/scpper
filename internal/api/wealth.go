@@ -13,10 +13,11 @@ import (
 )
 
 type wealthRow struct {
-	Rank     int    `json:"rank"`
-	PwikitID int64  `json:"pwikitId"`
-	Name     string `json:"name"`
-	Coins    int64  `json:"coins"`
+	Rank      int    `json:"rank"`
+	PwikitID  int64  `json:"pwikitId"`
+	Name      string `json:"name"`
+	AvatarURL string `json:"avatarUrl"`
+	Coins     int64  `json:"coins"`
 }
 
 func (s *Server) handleRankWealth(w http.ResponseWriter, r *http.Request) error {
@@ -28,7 +29,8 @@ func (s *Server) handleRankWealth(w http.ResponseWriter, r *http.Request) error 
 		return err
 	}
 	rows, err := s.db.Query(ctx, `
-		SELECT row_number() OVER (ORDER BY coins DESC, lower(name), pwikit_id)::int, pwikit_id, name, coins
+		SELECT row_number() OVER (ORDER BY coins DESC, lower(name), pwikit_id)::int, pwikit_id, name,
+		       coalesce(avatar_url, ''), coins
 		FROM users
 		WHERE banned_at IS NULL
 		ORDER BY coins DESC, lower(name), pwikit_id
@@ -40,7 +42,7 @@ func (s *Server) handleRankWealth(w http.ResponseWriter, r *http.Request) error 
 	items := []wealthRow{}
 	for rows.Next() {
 		var row wealthRow
-		if err := rows.Scan(&row.Rank, &row.PwikitID, &row.Name, &row.Coins); err != nil {
+		if err := rows.Scan(&row.Rank, &row.PwikitID, &row.Name, &row.AvatarURL, &row.Coins); err != nil {
 			return err
 		}
 		items = append(items, row)

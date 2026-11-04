@@ -25,7 +25,7 @@ func (s *Server) handleAdminOverview(w http.ResponseWriter, r *http.Request) err
 		SELECT
 			(SELECT COUNT(*) FROM users WHERE banned_at IS NULL),
 			(SELECT COUNT(*) FROM users WHERE banned_at IS NULL
-			   AND last_active_at >= date_trunc('day', now() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai'),
+			   AND last_active_at >= date_trunc('day', now() AT TIME ZONE INTERVAL '+08:00') AT TIME ZONE INTERVAL '+08:00'),
 			(SELECT COALESCE(SUM(coins), 0) FROM users),
 			(SELECT COUNT(*) FROM articles WHERE status <> 'deleted'),
 			(SELECT COALESCE(SUM(amount), 0) FROM tips)`,

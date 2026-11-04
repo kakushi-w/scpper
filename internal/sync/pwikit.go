@@ -79,35 +79,43 @@ func (e *Engine) SyncPwikit(ctx context.Context, src *Source) (PwikitReport, err
 // made here rather than on a reader's first visit.
 func (e *Engine) syncUsers(ctx context.Context, src *Source) (int, error) {
 	rows, err := src.pool.Query(ctx, `
-		SELECT id, username::text FROM web_user WHERE type = 'normal'`)
+		SELECT id, username::text, coalesce(avatar, '') FROM web_user WHERE type = 'normal'`)
 	if err != nil {
 		return 0, err
 	}
 	var ids []int64
-	var names []string
+	var names, avatars []string
 	for rows.Next() {
 		var id int64
-		var name string
-		if err := rows.Scan(&id, &name); err != nil {
+		var name, avatar string
+		if err := rows.Scan(&id, &name, &avatar); err != nil {
 			rows.Close()
 			return 0, err
 		}
 		ids = append(ids, id)
 		names = append(names, name)
+		avatars = append(avatars, avatarURL(avatar))
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
 		return 0, err
 	}
 	tag, err := e.db.Exec(ctx, `
-		INSERT INTO users (pwikit_id, name)
-		SELECT * FROM unnest($1::bigint[], $2::text[])
-		ON CONFLICT (pwikit_id) DO UPDATE SET name = EXCLUDED.name
-		WHERE users.name IS DISTINCT FROM EXCLUDED.name`, ids, names)
+		INSERT INTO users (pwikit_id, name, avatar_url)
+		SELECT * FROM unnest($1::bigint[], $2::text[], $3::text[])
+		ON CONFLICT (pwikit_id) DO UPDATE SET name = EXCLUDED.name, avatar_url = EXCLUDED.avatar_url
+		WHERE (users.name, users.avatar_url) IS DISTINCT FROM (EXCLUDED.name, EXCLUDED.avatar_url)`, ids, names, avatars)
 	if err != nil {
 		return 0, err
 	}
 	return int(tag.RowsAffected()), nil
+}
+
+func avatarURL(file string) string {
+	if file == "" {
+		return "/-/static/images/default_avatar.png"
+	}
+	return "/local--files/" + file
 }
 
 const pagesSQL = `

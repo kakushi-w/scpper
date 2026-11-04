@@ -164,6 +164,7 @@ export interface WealthRankRow {
   rank: number;
   pwikitId: number;
   name: string;
+  avatarUrl?: string | null;
   coins: number;
 }
 

@@ -121,7 +121,7 @@ func (e *Engine) cromFairPriceAt(ctx context.Context, sym Symbol, at time.Time) 
 	var a float64
 	err := e.db.QueryRow(ctx, `
 		WITH d AS (
-			SELECT ($1::timestamptz AT TIME ZONE 'UTC')::date AS d0
+			SELECT ($1::timestamptz AT TIME ZONE INTERVAL '+00:00')::date AS d0
 		), w AS (
 			SELECT
 			  (SELECT COUNT(*) FROM crom_content_pages

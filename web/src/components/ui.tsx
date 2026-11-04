@@ -1,6 +1,6 @@
 "use client";
 
-import type { CSSProperties, ReactNode } from "react";
+import { useState, type CSSProperties, type ReactNode } from "react";
 import { formatCompact } from "@/lib/format";
 import scpLine from "@/assets/scp-line.png";
 
@@ -99,7 +99,21 @@ export function ProgressBar({ value, max, tone = "primary" }: { value: number; m
 
 const AVATAR_COLORS = ["#8a9bb0", "#b0938a", "#8ab09a", "#a08ab0", "#b0a98a", "#7f9fb8", "#b88a8a"];
 
-export function Avatar({ name, size = 36 }: { name: string; size?: number }) {
+export function Avatar({ name, url, size = 36 }: { name: string; url?: string | null; size?: number }) {
+  const [failed, setFailed] = useState(false);
+  if (url && !failed) {
+    return (
+      <img
+        className="av"
+        src={url}
+        alt=""
+        width={size}
+        height={size}
+        style={{ width: size, height: size, objectFit: "cover", background: "#eef0f3" }}
+        onError={() => setFailed(true)}
+      />
+    );
+  }
   let h = 0;
   for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
   return (

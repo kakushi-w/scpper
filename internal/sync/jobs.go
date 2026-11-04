@@ -21,7 +21,10 @@ type jobBoard struct {
 	jobs map[string]*Job
 }
 
-const keepFinishedJobs = 30 * time.Minute
+const (
+	keepDoneJobs   = time.Minute
+	keepFailedJobs = 30 * time.Minute
+)
 
 func (b *jobBoard) start(kind, target string, total int) *Job {
 	b.mu.Lock()
@@ -71,7 +74,11 @@ func (b *jobBoard) list() []Job {
 	defer b.mu.Unlock()
 	out := []Job{}
 	for key, j := range b.jobs {
-		if j.FinishedAt != nil && time.Since(*j.FinishedAt) > keepFinishedJobs {
+		keep := keepDoneJobs
+		if j.Err != "" {
+			keep = keepFailedJobs
+		}
+		if j.FinishedAt != nil && time.Since(*j.FinishedAt) > keep {
 			delete(b.jobs, key)
 			continue
 		}

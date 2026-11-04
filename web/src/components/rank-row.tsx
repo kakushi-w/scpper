@@ -6,7 +6,7 @@ export function RankRow({ row, me }: { row: WealthRankRow; me?: boolean }) {
   return (
     <div className={`lr${me ? " me" : ""}`}>
       <span className="rk sc-num">{row.rank}</span>
-      <Avatar name={row.name} size={36} />
+      <Avatar name={row.name} url={row.avatarUrl} size={36} />
       <span className="nm">
         <a href={`/-/users/${row.pwikitId}`}>{row.name}</a>
       </span>

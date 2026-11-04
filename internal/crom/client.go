@@ -556,7 +556,18 @@ func (c *Client) do(ctx context.Context, query string, vars map[string]any, out 
 			for _, e := range gr.Errors {
 				msgs = append(msgs, e.Message)
 			}
-			return fmt.Errorf("crom graphql: %s", strings.Join(msgs, "; "))
+			joined := strings.Join(msgs, "; ")
+			// Crom answers a burst with 200 and this message rather than 429.
+			if strings.Contains(strings.ToLower(joined), "too often") {
+				delay := backoff(attempt)
+				slog.Warn("crom throttled, retrying", "attempt", attempt, "delay", delay)
+				lastErr = fmt.Errorf("crom graphql: %s", joined)
+				if !sleepCtx(ctx, delay) {
+					return ctx.Err()
+				}
+				continue
+			}
+			return fmt.Errorf("crom graphql: %s", joined)
 		}
 		if out == nil || len(gr.Data) == 0 {
 			return nil

@@ -21,7 +21,7 @@ function Podium({ rows }: { rows: WealthRankRow[] }) {
     <div className="podium">
       {order.map(([row, cls, size]) => (
         <div key={row.pwikitId} className={cls}>
-          <Avatar name={row.name} size={size} />
+          <Avatar name={row.name} url={row.avatarUrl} size={size} />
           <p>
             <a href={`/-/users/${row.pwikitId}`}>{row.name}</a>
           </p>
@@ -66,7 +66,7 @@ export default function RankPage() {
       <Pager page={page} pages={pages} onPage={setPage} />
       {user && standing?.rank != null && (
         <div className="mine-bar">
-          <RankRow row={{ rank: standing.rank, pwikitId: user.pwikitId, name: user.name, coins: standing.coins }} me />
+          <RankRow row={{ rank: standing.rank, pwikitId: user.pwikitId, name: user.name, avatarUrl: user.avatarUrl, coins: standing.coins }} me />
         </div>
       )}
     </div>

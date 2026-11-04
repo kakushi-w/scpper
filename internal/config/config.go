@@ -54,7 +54,7 @@ func Load() (*Config, error) {
 		PwikitMount:       env("PWIKIT_MOUNT", "/scpper/"),
 
 		CromGraphQLURL:     env("CROM_GRAPHQL_URL", "https://apiv1.crom.avn.sh/graphql"),
-		CromQPS:            envFloat("CROM_QPS", 2),
+		CromQPS:            envFloat("CROM_QPS", 1),
 		CromRecentPages:    envInt("CROM_RECENT_PAGES", 600),
 		CromRecentInterval: envDuration("CROM_RECENT_INTERVAL", time.Hour),
 
