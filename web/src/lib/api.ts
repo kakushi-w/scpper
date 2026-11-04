@@ -139,14 +139,14 @@ export const api = {
   stockAuctions: (symbol = "CLOUD", limit = 12) =>
     request<{ items: StockAuction[] }>(`/api/stock/auctions${qs({ symbol, limit })}`),
   stockPortfolio: () => request<StockPortfolio>("/api/stock/portfolio"),
-  stockPlace: (body: { symbol?: string; side: "buy" | "sell"; qty: number; leverage?: number }) =>
+  stockPlace: ({ symbol, ...body }: { symbol?: string; side: "buy" | "sell"; qty: number; leverage?: number }) =>
     request<{
       orderId: number;
       hold: number;
       balance: number;
       nextAuctionAt: string;
       symbol: string;
-    }>(`/api/stock/orders${qs({ symbol: body.symbol ?? "CLOUD" })}`, { method: "POST", body }),
+    }>(`/api/stock/orders${qs({ symbol: symbol ?? "CLOUD" })}`, { method: "POST", body }),
   stockCancel: (id: number) =>
     request<{ ok: boolean; balance: number }>(`/api/stock/orders/${id}`, { method: "DELETE" }),
   stockTrades: (p = 1, limit = 50, symbol = "") =>
