@@ -44,7 +44,7 @@ func (s *Source) siteID(ctx context.Context) (int64, error) {
 const batchSize = 2000
 
 type PwikitReport struct {
-	Pages, Deleted, Revisions, Votes, Posts int
+	Users, Pages, Deleted, Revisions, Votes, Posts int
 }
 
 func (e *Engine) SyncPwikit(ctx context.Context, src *Source) (PwikitReport, error) {
@@ -52,6 +52,9 @@ func (e *Engine) SyncPwikit(ctx context.Context, src *Source) (PwikitReport, err
 	site, err := src.siteID(ctx)
 	if err != nil {
 		return rep, err
+	}
+	if rep.Users, err = e.syncUsers(ctx, src); err != nil {
+		return rep, fmt.Errorf("users: %w", err)
 	}
 	if rep.Pages, rep.Deleted, err = e.syncPages(ctx, src, site); err != nil {
 		return rep, fmt.Errorf("pages: %w", err)
@@ -70,6 +73,41 @@ func (e *Engine) SyncPwikit(ctx context.Context, src *Source) (PwikitReport, err
 		return rep, fmt.Errorf("posts: %w", err)
 	}
 	return rep, nil
+}
+
+// Everyone on the instance has a place on the wealth ranking, so accounts are
+// made here rather than on a reader's first visit.
+func (e *Engine) syncUsers(ctx context.Context, src *Source) (int, error) {
+	rows, err := src.pool.Query(ctx, `
+		SELECT id, username::text FROM web_user WHERE type = 'normal'`)
+	if err != nil {
+		return 0, err
+	}
+	var ids []int64
+	var names []string
+	for rows.Next() {
+		var id int64
+		var name string
+		if err := rows.Scan(&id, &name); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		ids = append(ids, id)
+		names = append(names, name)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	tag, err := e.db.Exec(ctx, `
+		INSERT INTO users (pwikit_id, name)
+		SELECT * FROM unnest($1::bigint[], $2::text[])
+		ON CONFLICT (pwikit_id) DO UPDATE SET name = EXCLUDED.name
+		WHERE users.name IS DISTINCT FROM EXCLUDED.name`, ids, names)
+	if err != nil {
+		return 0, err
+	}
+	return int(tag.RowsAffected()), nil
 }
 
 const pagesSQL = `
@@ -393,7 +431,7 @@ func (e *Engine) RunPwikit(ctx context.Context, src *Source, every time.Duration
 		if err != nil {
 			slog.Error("sync pwikit", "err", err)
 		} else {
-			slog.Info("sync pwikit", "pages", rep.Pages, "deleted", rep.Deleted, "revisions", rep.Revisions,
+			slog.Info("sync pwikit", "users", rep.Users, "pages", rep.Pages, "deleted", rep.Deleted, "revisions", rep.Revisions,
 				"votes", rep.Votes, "posts", rep.Posts, "took", time.Since(started).Round(time.Millisecond))
 		}
 		select {

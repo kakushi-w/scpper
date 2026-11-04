@@ -20,6 +20,7 @@ import type {
   StockPortfolio,
   StockQuote,
   StockSymbol,
+  StockJob,
   StockTrade,
   TasksResponse,
   WealthRankRow,
@@ -179,6 +180,11 @@ export const api = {
       request<unknown>(`/api/admin/stock/symbols/${code}/params`, { method: "POST", body }),
     stockList: (code: string) =>
       request<{ queued: string; symbol: string }>(`/api/admin/stock/symbols/${code}/list`, {
+        method: "POST",
+      }),
+    stockJobs: () => request<{ items: StockJob[] }>("/api/admin/stock/jobs"),
+    stockHistory: (code: string) =>
+      request<{ queued: string; symbol: string }>(`/api/admin/stock/symbols/${code}/history`, {
         method: "POST",
       }),
     stockDelist: (code: string) =>

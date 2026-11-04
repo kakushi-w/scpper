@@ -93,7 +93,13 @@ func (e *Engine) syncCrom(ctx context.Context, only string, order crom.SweepOrde
 
 	var out []CromStats
 	for _, s := range sites {
-		st, err := e.syncCromSite(ctx, s, order, limit)
+		kind := "crom-sync"
+		if order == crom.ByURL {
+			kind = "crom-full"
+		}
+		j := e.jobs.start(kind, s.SiteURL, 0)
+		st, err := e.syncCromSite(ctx, s, order, limit, j)
+		e.jobs.finish(j, err)
 		if err != nil {
 			if ctx.Err() != nil {
 				return out, ctx.Err()
@@ -109,7 +115,7 @@ func (e *Engine) syncCrom(ctx context.Context, only string, order crom.SweepOrde
 	return out, nil
 }
 
-func (e *Engine) syncCromSite(ctx context.Context, site CromSite, order crom.SweepOrder, limit int) (CromStats, error) {
+func (e *Engine) syncCromSite(ctx context.Context, site CromSite, order crom.SweepOrder, limit int, j *Job) (CromStats, error) {
 	start := time.Now()
 	st := CromStats{Site: site.SiteURL}
 
@@ -127,6 +133,7 @@ func (e *Engine) syncCromSite(ctx context.Context, site CromSite, order crom.Swe
 				return st, err
 			}
 			st.Swept += len(res.Pages)
+			e.jobs.progress(j, st.Swept, 0)
 		}
 		cursor = res.NextCursor
 
@@ -454,6 +461,13 @@ func (e *Engine) PruneCrom(ctx context.Context) error {
 }
 
 func (e *Engine) BackfillCrom(ctx context.Context, siteURL string) (CromStats, error) {
+	j := e.jobs.start("crom-backfill", siteURL, 0)
+	st, err := e.backfillCrom(ctx, siteURL, j)
+	e.jobs.finish(j, err)
+	return st, err
+}
+
+func (e *Engine) backfillCrom(ctx context.Context, siteURL string, j *Job) (CromStats, error) {
 	if e.crom == nil {
 		return CromStats{}, fmt.Errorf("crom client is not set up")
 	}
@@ -477,6 +491,7 @@ func (e *Engine) BackfillCrom(ctx context.Context, siteURL string) (CromStats, e
 				return st, err
 			}
 			st.Swept += len(details)
+			e.jobs.progress(j, st.Swept, 0)
 		}
 		cursor = next
 

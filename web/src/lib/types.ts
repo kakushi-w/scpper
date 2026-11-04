@@ -619,6 +619,16 @@ export interface Candle {
   volume: number;
 }
 
+export interface StockJob {
+  kind: string;
+  target: string;
+  done: number;
+  total: number;
+  startedAt: string;
+  finishedAt?: string;
+  error?: string;
+}
+
 export interface StockTrade {
   symbol: string;
   side: "buy" | "sell";

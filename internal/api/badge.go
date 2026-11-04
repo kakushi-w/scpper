@@ -31,7 +31,7 @@ func (s *Server) handleBadge(w http.ResponseWriter, r *http.Request) error {
 		rank = "#" + strconv.Itoa(*st.Rank)
 	}
 	w.Header().Set("Content-Type", "image/svg+xml")
-	w.Header().Set("Cache-Control", "public, max-age=300")
+	w.Header().Set("Cache-Control", "no-store")
 	_, err = w.Write([]byte(badgeSVG(rank, strconv.FormatInt(st.Coins, 10))))
 	return err
 }

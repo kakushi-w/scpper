@@ -28,10 +28,10 @@ func (s *Server) handleRankWealth(w http.ResponseWriter, r *http.Request) error 
 		return err
 	}
 	rows, err := s.db.Query(ctx, `
-		SELECT rank() OVER (ORDER BY coins DESC)::int, pwikit_id, name, coins
+		SELECT row_number() OVER (ORDER BY coins DESC, lower(name), pwikit_id)::int, pwikit_id, name, coins
 		FROM users
 		WHERE banned_at IS NULL
-		ORDER BY coins DESC, name
+		ORDER BY coins DESC, lower(name), pwikit_id
 		LIMIT $1 OFFSET $2`, pg.Size, pg.Offset)
 	if err != nil {
 		return err
@@ -65,7 +65,9 @@ func (s *Server) standingOf(r *http.Request, pwikitID int64) (*standing, error) 
 	err := s.db.QueryRow(r.Context(), `
 		SELECT u.pwikit_id, u.name, u.coins,
 		       CASE WHEN u.banned_at IS NULL THEN
-		            (SELECT COUNT(*) + 1 FROM users o WHERE o.banned_at IS NULL AND o.coins > u.coins)::int END,
+		            (SELECT COUNT(*) + 1 FROM users o WHERE o.banned_at IS NULL
+		              AND (o.coins > u.coins OR (o.coins = u.coins
+		                   AND (lower(o.name), o.pwikit_id) < (lower(u.name), u.pwikit_id))))::int END,
 		       (SELECT COUNT(*) FROM users WHERE banned_at IS NULL)::int
 		FROM users u WHERE u.pwikit_id = $1`, pwikitID,
 	).Scan(&st.PwikitID, &st.Name, &st.Coins, &st.Rank, &st.Ranked)

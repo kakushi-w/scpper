@@ -3,6 +3,58 @@
 import { useEffect, useRef, useState } from "react";
 import type { Candle } from "@/lib/types";
 
+const MA: [number, string][] = [
+  [5, "#f0a20b"],
+  [10, "#2f7be5"],
+  [20, "#a24fd6"],
+];
+
+function movingAverage(candles: Candle[], n: number): (number | null)[] {
+  let sum = 0;
+  return candles.map((c, i) => {
+    sum += c.close;
+    if (i >= n) sum -= candles[i - n]!.close;
+    return i >= n - 1 ? sum / n : null;
+  });
+}
+
+// Monotone cubic keeps the curve from swinging past the values it joins, which
+// a plain spline does whenever the average turns sharply.
+function smoothCurve(ctx: CanvasRenderingContext2D, pts: [number, number][]) {
+  const n = pts.length;
+  if (n < 2) return;
+  const d: number[] = [];
+  const m: number[] = [];
+  for (let i = 0; i < n - 1; i++) d.push((pts[i + 1]![1] - pts[i]![1]) / (pts[i + 1]![0] - pts[i]![0]));
+  m.push(d[0]!);
+  for (let i = 1; i < n - 1; i++) m.push(d[i - 1]! * d[i]! <= 0 ? 0 : (d[i - 1]! + d[i]!) / 2);
+  m.push(d[n - 2]!);
+  for (let i = 0; i < n - 1; i++) {
+    if (d[i] === 0) {
+      m[i] = 0;
+      m[i + 1] = 0;
+      continue;
+    }
+    const a = m[i]! / d[i]!;
+    const b = m[i + 1]! / d[i]!;
+    const h = a * a + b * b;
+    if (h > 9) {
+      const t = 3 / Math.sqrt(h);
+      m[i] = t * a * d[i]!;
+      m[i + 1] = t * b * d[i]!;
+    }
+  }
+  ctx.beginPath();
+  ctx.moveTo(pts[0]![0], pts[0]![1]);
+  for (let i = 0; i < n - 1; i++) {
+    const [x0, y0] = pts[i]!;
+    const [x1, y1] = pts[i + 1]!;
+    const dx = (x1 - x0) / 3;
+    ctx.bezierCurveTo(x0 + dx, y0 + m[i]! * dx, x1 - dx, y1 - m[i + 1]! * dx, x1, y1);
+  }
+  ctx.stroke();
+}
+
 export function CandleChart({ candles }: { candles: Candle[] }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -94,6 +146,18 @@ export function CandleChart({ candles }: { candles: Candle[] }) {
         }
       });
 
+      ctx.lineWidth = 1.3;
+      ctx.lineJoin = "round";
+      for (const [n, color] of MA) {
+        const pts: [number, number][] = [];
+        movingAverage(candles, n).forEach((v, i) => {
+          if (v !== null) pts.push([padL + slot * (i + 0.5), y(v)]);
+        });
+        ctx.strokeStyle = color;
+        smoothCurve(ctx, pts);
+      }
+      ctx.lineWidth = 1;
+
       if (hover !== null && candles[hover]) {
         const cx = padL + slot * (hover + 0.5);
         ctx.strokeStyle = css("--sc-primary");
@@ -128,7 +192,9 @@ export function CandleChart({ candles }: { candles: Candle[] }) {
     setHover(i >= 0 && i < candles.length ? i : null);
   }
 
-  const active = hover !== null ? candles[hover] : candles[candles.length - 1];
+  const at = hover !== null ? hover : candles.length - 1;
+  const active = candles[at];
+  const averages = MA.map(([n, color]) => [n, color, movingAverage(candles, n)[at] ?? null] as const);
 
   if (candles.length === 0) {
     return (
@@ -165,6 +231,14 @@ export function CandleChart({ candles }: { candles: Candle[] }) {
             收 {active.close.toFixed(2)}
           </span>
           <span style={{ color: "var(--sc-text-3)" }}>量 {active.volume}</span>
+          {averages.map(([n, color, v]) =>
+            v === null ? null : (
+              <span key={n} className="inline-flex items-center gap-1">
+                <i style={{ display: "inline-block", width: 10, height: 2, background: color }} />
+                MA{n} {v.toFixed(2)}
+              </span>
+            ),
+          )}
         </div>
       )}
     </div>

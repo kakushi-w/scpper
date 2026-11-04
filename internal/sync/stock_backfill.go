@@ -31,7 +31,7 @@ func beijingMidnight(t time.Time) time.Time {
 	return time.Date(b.Year(), b.Month(), b.Day(), 0, 0, 0, 0, beijing)
 }
 
-func (e *Engine) BackfillStock(ctx context.Context, sym Symbol, from, openAt time.Time) (int, error) {
+func (e *Engine) BackfillStock(ctx context.Context, sym Symbol, from, openAt time.Time, j *Job) (int, error) {
 	p := sym.Params
 
 	from = beijingMidnight(from)
@@ -41,11 +41,49 @@ func (e *Engine) BackfillStock(ctx context.Context, sym Symbol, from, openAt tim
 			from.Format("2006-01-02"), openAt.Format("2006-01-02"))
 	}
 
+	n, err := e.drawHistory(ctx, sym, from, openAt, j)
+	if err != nil {
+		return n, err
+	}
+
+	openFair, err := e.StockFairPriceAt(ctx, sym, openAt)
+	if err != nil {
+		return n, err
+	}
+	if openFair < p.MinPrice {
+		openFair = p.MinPrice
+	}
+	if err := e.db.InTx(ctx, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx,
+			`UPDATE stock_symbols SET listed_at = $2 WHERE code = $1`,
+			sym.Code, openAt.UTC()); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx,
+			`UPDATE stock_maker SET p_ref = $2, p_fair = $2, updated_at = now() WHERE symbol = $1`,
+			sym.Code, round4(openFair))
+		return err
+	}); err != nil {
+		return n, err
+	}
+
+	slog.Info("price history drawn",
+		"symbol", sym.Code,
+		"from", from.Format("2006-01-02"), "to", openAt.Format("2006-01-02"),
+		"days", n, "open", round2(openFair))
+	return n, nil
+}
+
+func (e *Engine) drawHistory(ctx context.Context, sym Symbol, from, until time.Time, j *Job) (int, error) {
+	p := sym.Params
 	var (
 		n    int
 		prev float64
 	)
-	for d := from; d.Before(openAt); d = d.AddDate(0, 0, 1) {
+	start := beijingMidnight(from)
+	days := int(until.Sub(start).Hours()/24 + 0.5)
+	for d := start; d.Before(until); d = d.AddDate(0, 0, 1) {
+		e.jobs.progress(j, int(d.Sub(start).Hours()/24+0.5), days)
 		asOf := d.Add(24*time.Hour - time.Second)
 
 		fair, err := e.StockFairPriceAt(ctx, sym, asOf)
@@ -80,36 +118,18 @@ func (e *Engine) BackfillStock(ctx context.Context, sym Symbol, from, openAt tim
 		}
 		prev = fair
 	}
-
-	openFair, err := e.StockFairPriceAt(ctx, sym, openAt)
-	if err != nil {
-		return n, err
-	}
-	if openFair < p.MinPrice {
-		openFair = p.MinPrice
-	}
-	if err := e.db.InTx(ctx, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx,
-			`UPDATE stock_symbols SET listed_at = $2 WHERE code = $1`,
-			sym.Code, openAt.UTC()); err != nil {
-			return err
-		}
-		_, err := tx.Exec(ctx,
-			`UPDATE stock_maker SET p_ref = $2, p_fair = $2, updated_at = now() WHERE symbol = $1`,
-			sym.Code, round4(openFair))
-		return err
-	}); err != nil {
-		return n, err
-	}
-
-	slog.Info("price history drawn",
-		"symbol", sym.Code,
-		"from", from.Format("2006-01-02"), "to", openAt.Format("2006-01-02"),
-		"days", n, "open", round2(openFair))
+	e.jobs.progress(j, days, days)
 	return n, nil
 }
 
 func (e *Engine) ListSymbol(ctx context.Context, code string, backfillDays int, openAt time.Time) error {
+	j := e.jobs.start("stock-list", code, 0)
+	err := e.listSymbol(ctx, code, backfillDays, openAt, j)
+	e.jobs.finish(j, err)
+	return err
+}
+
+func (e *Engine) listSymbol(ctx context.Context, code string, backfillDays int, openAt time.Time, j *Job) error {
 	sym, err := e.Symbol(ctx, code)
 	if err != nil {
 		return fmt.Errorf("symbol %s: %w", code, err)
@@ -172,7 +192,7 @@ func (e *Engine) ListSymbol(ctx context.Context, code string, backfillDays int, 
 			from = e.cfg.CromHistoryFrom
 		}
 	}
-	if _, err := e.BackfillStock(ctx, sym, from, openAt); err != nil {
+	if _, err := e.BackfillStock(ctx, sym, from, openAt, j); err != nil {
 		return err
 	}
 
@@ -184,6 +204,58 @@ func (e *Engine) ListSymbol(ctx context.Context, code string, backfillDays int, 
 	slog.Info("symbol listed",
 		"symbol", sym.Code, "name", sym.Name, "scale_base", pages,
 		"open", openAt.Format("2006-01-02"))
+	return nil
+}
+
+func (e *Engine) RedrawHistory(ctx context.Context, code string) error {
+	j := e.jobs.start("stock-history", code, 0)
+	err := e.redrawHistory(ctx, code, j)
+	e.jobs.finish(j, err)
+	return err
+}
+
+// Only the days before the first auction are redrawn. Everything from then on
+// is what the market actually did.
+func (e *Engine) redrawHistory(ctx context.Context, code string, j *Job) error {
+	sym, err := e.Symbol(ctx, code)
+	if err != nil {
+		return fmt.Errorf("symbol %s: %w", code, err)
+	}
+	if !sym.Enabled {
+		return fmt.Errorf("symbol %s is not listed", code)
+	}
+	first, ok, err := e.firstPageOf(ctx, sym)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("symbol %s has no mirrored pages", code)
+	}
+	if sym.IsCrom() && !e.cfg.CromHistoryFrom.IsZero() && e.cfg.CromHistoryFrom.After(first) {
+		first = e.cfg.CromHistoryFrom
+	}
+	until := beijingMidnight(time.Now())
+	var auction *time.Time
+	if err := e.db.QueryRow(ctx,
+		`SELECT MIN(at) FROM stock_auctions WHERE symbol = $1`, code).Scan(&auction); err != nil {
+		return err
+	}
+	if auction != nil {
+		until = beijingMidnight(*auction)
+	}
+	if !beijingMidnight(first).Before(until) {
+		return nil
+	}
+	if _, err := e.db.Exec(ctx,
+		`DELETE FROM stock_ticks WHERE symbol = $1 AND at < $2`, code, until.UTC()); err != nil {
+		return err
+	}
+	n, err := e.drawHistory(ctx, sym, first, until, j)
+	if err != nil {
+		return err
+	}
+	slog.Info("price history redrawn", "symbol", code,
+		"from", beijingMidnight(first).Format("2006-01-02"), "to", until.Format("2006-01-02"), "days", n)
 	return nil
 }
 
@@ -323,16 +395,33 @@ func (e *Engine) EnsureLocalHistory(ctx context.Context) error {
 		if sym.IsCrom() {
 			continue
 		}
-		var ticks int
-		if err := e.db.QueryRow(ctx, `SELECT COUNT(*) FROM stock_ticks WHERE symbol = $1`, sym.Code).Scan(&ticks); err != nil {
+		var earliest *time.Time
+		if err := e.db.QueryRow(ctx, `SELECT MIN(at) FROM stock_ticks WHERE symbol = $1`, sym.Code).Scan(&earliest); err != nil {
 			return err
 		}
-		if ticks > 0 {
+		if earliest == nil {
+			j := e.jobs.start("stock-history", sym.Code, 0)
+			_, err := e.BackfillStock(ctx, sym, first, time.Now(), j)
+			e.jobs.finish(j, err)
+			if err != nil {
+				return err
+			}
 			continue
 		}
-		if _, err := e.BackfillStock(ctx, sym, first, time.Now()); err != nil {
+		// Trading may have started before the mirror had any pages, which
+		// leaves the years before it blank. Only that gap is drawn here.
+		until := beijingMidnight(*earliest)
+		if !beijingMidnight(first).Before(until) {
+			continue
+		}
+		j := e.jobs.start("stock-history", sym.Code, 0)
+		n, err := e.drawHistory(ctx, sym, first, until, j)
+		e.jobs.finish(j, err)
+		if err != nil {
 			return err
 		}
+		slog.Info("price history filled", "symbol", sym.Code,
+			"from", beijingMidnight(first).Format("2006-01-02"), "to", until.Format("2006-01-02"), "days", n)
 	}
 	return nil
 }

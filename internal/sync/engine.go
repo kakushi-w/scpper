@@ -17,6 +17,7 @@ type Engine struct {
 	cfg  *config.Config
 	db   *db.DB
 	crom *crom.Client
+	jobs jobBoard
 }
 
 func NewEngine(cfg *config.Config, database *db.DB) *Engine {

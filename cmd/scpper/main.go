@@ -141,7 +141,12 @@ func background(ctx context.Context, cfg *config.Config, engine *sync.Engine, sc
 			}
 		}()
 	}
-	every(cfg.StockTickInterval, "stock tick", engine.StockTick)
+	every(cfg.StockTickInterval, "stock tick", func(ctx context.Context) error {
+		if err := engine.EnsureLocalHistory(ctx); err != nil {
+			slog.Error("draw price history", "err", err)
+		}
+		return engine.StockTick(ctx)
+	})
 	every(cfg.CromRecentInterval, "crom recent", func(ctx context.Context) error {
 		_, err := engine.SyncCromRecent(ctx, "", cfg.CromRecentPages)
 		return err

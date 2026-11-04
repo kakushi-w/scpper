@@ -428,7 +428,28 @@ func (s *Server) handleAdminCromFull(w http.ResponseWriter, r *http.Request) err
 	return nil
 }
 
+func (s *Server) handleAdminStockHistory(w http.ResponseWriter, r *http.Request) error {
+	code := strings.ToUpper(strings.TrimSpace(urlParam(r, "code")))
+	if err := s.queueSync(r.Context(), "stock-history", code, ""); err != nil {
+		return err
+	}
+	httpx.OK(w, map[string]any{"queued": "stock-history", "symbol": code})
+	return nil
+}
+
+func (s *Server) handleAdminStockJobs(w http.ResponseWriter, _ *http.Request) error {
+	httpx.OK(w, map[string]any{"items": s.engine.Jobs()})
+	return nil
+}
+
 func (s *Server) queueSync(_ context.Context, kind, symbol, site string) error {
+	target := symbol
+	if site != "" {
+		target = site
+	}
+	if s.engine.JobRunning(kind, target) {
+		return httpx.Conflict("该任务正在进行中")
+	}
 	go func() {
 		ctx := context.Background()
 		var err error
@@ -441,6 +462,8 @@ func (s *Server) queueSync(_ context.Context, kind, symbol, site string) error {
 			_, err = s.engine.BackfillCrom(ctx, site)
 		case "crom-full":
 			_, err = s.engine.SyncCromFull(ctx, site)
+		case "stock-history":
+			err = s.engine.RedrawHistory(ctx, symbol)
 		}
 		if err != nil {
 			slog.Error("admin job", "kind", kind, "symbol", symbol, "site", site, "err", err)

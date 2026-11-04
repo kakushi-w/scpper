@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { EmptyState, ErrorState, ListSkeleton, Panel, Section, StatTile } from "@/components/ui";
 import { api } from "@/lib/api";
 import { formatDate, formatDateTime, formatNumber } from "@/lib/format";
-import type { AdminStockState, AdminTask, GachaParams, StockParams } from "@/lib/types";
+import type { AdminStockState, AdminTask, GachaParams, StockJob, StockParams } from "@/lib/types";
 
 type Tab = "overview" | "users" | "tasks" | "gacha" | "stock";
 
@@ -596,6 +596,7 @@ function StockTab() {
   const [err, setErr] = useState("");
   const [msg, setMsg] = useState("");
   const [raw, setRaw] = useState<Record<string, string>>({});
+  const [jobs, setJobs] = useState<StockJob[]>([]);
 
   const load = useCallback(async () => {
     try {
@@ -610,6 +611,22 @@ function StockTab() {
 
   useEffect(() => {
     void load();
+  }, [load]);
+
+  useEffect(() => {
+    let running = 0;
+    const poll = async () => {
+      try {
+        const list = (await api.admin.stockJobs()).items;
+        const now = list.filter((j) => !j.finishedAt).length;
+        if (now < running) void load();
+        running = now;
+        setJobs(list);
+      } catch {}
+    };
+    void poll();
+    const t = setInterval(poll, 3000);
+    return () => clearInterval(t);
   }, [load]);
 
   async function run(fn: () => Promise<unknown>, ok: string) {
@@ -676,6 +693,14 @@ function StockTab() {
 
   return (
     <>
+      {jobs.length > 0 && (
+        <Panel className="mb-3 p-3">
+          <div className="mb-2 text-[12px] font-semibold">后台任务</div>
+          {jobs.map((j) => (
+            <JobRow key={`${j.kind}-${j.target}-${j.startedAt}`} job={j} symbols={st.symbols} />
+          ))}
+        </Panel>
+      )}
       <Panel className="mb-3 p-3">
         <div className="mb-2 text-[12px] font-semibold">标的</div>
         <div className="flex flex-wrap gap-1.5">
@@ -804,6 +829,16 @@ function StockTab() {
                             }
                           >
                             立即撮合
+                          </button>
+                          <button
+                            type="button"
+                            disabled={busy}
+                            className="sc-btn h-6 px-2 text-[11px]"
+                            onClick={() =>
+                              run(() => api.admin.stockHistory(y.code), `正在重新加载 ${y.shortName} 的历史行情`)
+                            }
+                          >
+                            重新加载历史
                           </button>
                           {y.code !== "CLOUD" && (
                             <button
@@ -1057,5 +1092,46 @@ function StockTab() {
         </div>
       )}
     </>
+  );
+}
+
+const JOB_LABEL: Record<string, string> = {
+  "crom-backfill": "抓取镜像",
+  "crom-full": "全量同步",
+  "crom-sync": "同步镜像",
+  "stock-list": "上市",
+  "stock-history": "重新加载历史",
+};
+
+function elapsed(from: string, to?: string): string {
+  const s = Math.max(0, Math.round(((to ? new Date(to).getTime() : Date.now()) - new Date(from).getTime()) / 1000));
+  return s < 60 ? `${s} 秒` : `${Math.floor(s / 60)} 分 ${s % 60} 秒`;
+}
+
+function JobRow({ job, symbols }: { job: StockJob; symbols: { code: string; shortName: string; siteUrl?: string | null }[] }) {
+  const sym = symbols.find((y) => y.code === job.target || y.siteUrl === job.target);
+  const unit = job.kind.startsWith("crom") ? "页" : "天";
+  const amount = job.total > 0 ? `${formatNumber(job.done)} / ${formatNumber(job.total)} ${unit}` : `${formatNumber(job.done)} ${unit}`;
+  const pct = job.total > 0 ? Math.min(100, (job.done / job.total) * 100) : null;
+  const state = job.error ? `失败：${job.error}` : job.finishedAt ? `已完成，用时 ${elapsed(job.startedAt, job.finishedAt)}` : `进行中，已用 ${elapsed(job.startedAt)}`;
+  return (
+    <div className="border-b py-2 text-[12px] last:border-b-0" style={{ borderColor: "#f2f2f2" }}>
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <span>
+          <b className="font-medium">{sym?.shortName ?? job.target}</b> {JOB_LABEL[job.kind] ?? job.kind}
+          <span className="sc-num ml-2" style={{ color: "#666" }}>
+            {amount}
+          </span>
+        </span>
+        <span style={{ color: job.error ? "var(--sc-negative)" : job.finishedAt ? "var(--sc-positive)" : "var(--sc-primary)" }}>
+          {state}
+        </span>
+      </div>
+      {pct !== null && !job.finishedAt && (
+        <div className="mt-1 h-1" style={{ background: "#eef0f3" }}>
+          <div className="h-full" style={{ width: `${pct}%`, background: "var(--sc-primary)" }} />
+        </div>
+      )}
+    </div>
   );
 }

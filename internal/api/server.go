@@ -122,6 +122,8 @@ func (s *Server) Router() http.Handler {
 			r.Post("/stock/symbols/{code}/delist", httpx.Wrap(s.handleAdminStockDelist))
 			r.Post("/stock/crom/backfill", httpx.Wrap(s.handleAdminCromBackfill))
 			r.Post("/stock/crom/full", httpx.Wrap(s.handleAdminCromFull))
+			r.Get("/stock/jobs", httpx.Wrap(s.handleAdminStockJobs))
+			r.Post("/stock/symbols/{code}/history", httpx.Wrap(s.handleAdminStockHistory))
 		})
 	})
 
