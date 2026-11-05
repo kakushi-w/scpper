@@ -7,7 +7,7 @@ import { loginHref, useSession } from "@/components/session";
 import { api } from "@/lib/api";
 import { useLoad } from "@/lib/load";
 
-const SIZE = 30;
+const SIZE = 50;
 
 function Ledger() {
   const { user, standing } = useSession();

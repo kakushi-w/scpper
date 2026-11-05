@@ -803,3 +803,45 @@ export interface GachaParams {
   pityCount: number;
   tradeFeePct: number;
 }
+
+export interface AdminLedgerRow {
+  id: number;
+  userId: number;
+  name: string;
+  delta: number;
+  balanceAfter: number;
+  reason: string;
+  memo: string | null;
+  operator: string | null;
+  createdAt: string;
+}
+
+export interface AdminLedger extends ListResponse<AdminLedgerRow> {
+  income: number;
+  expense: number;
+}
+
+export interface TaskCompletion {
+  userId: number;
+  name: string;
+  progress: number;
+  target: number;
+  completedAt: string | null;
+  claimedAt: string | null;
+}
+
+export interface TaskCompletions extends ListResponse<TaskCompletion> {
+  period: string;
+  periods: { period: string; completed: number; claimed: number }[];
+}
+
+export interface StockHolder {
+  userId: number;
+  name: string;
+  qty: number;
+  lockedQty: number;
+  avgCost: number;
+  margin: number;
+  realizedPnl: number;
+  value: number;
+}

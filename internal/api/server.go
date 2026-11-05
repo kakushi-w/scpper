@@ -106,10 +106,13 @@ func (s *Server) Router() http.Handler {
 			r.Get("/users", httpx.Wrap(s.handleAdminUsers))
 			r.Post("/users/{id}/coins", httpx.Wrap(s.handleAdminGrantCoins))
 			r.Post("/users/{id}/role", httpx.Wrap(s.handleAdminSetRole))
+			r.Get("/ledger", httpx.Wrap(s.handleAdminLedger))
+			r.Post("/coins/grant-all", httpx.Wrap(s.handleAdminGrantAll))
 
 			r.Get("/tasks", httpx.Wrap(s.handleAdminTasks))
 			r.Post("/tasks", httpx.Wrap(s.handleAdminSaveTask))
 			r.Post("/tasks/{code}", httpx.Wrap(s.handleAdminSaveTask))
+			r.Get("/tasks/{code}/completions", httpx.Wrap(s.handleAdminTaskCompletions))
 
 			r.Get("/gacha", httpx.Wrap(s.handleAdminGacha))
 			r.Post("/gacha", httpx.Wrap(s.handleAdminGachaParams))
@@ -123,6 +126,7 @@ func (s *Server) Router() http.Handler {
 			r.Post("/stock/crom/backfill", httpx.Wrap(s.handleAdminCromBackfill))
 			r.Post("/stock/crom/full", httpx.Wrap(s.handleAdminCromFull))
 			r.Get("/stock/jobs", httpx.Wrap(s.handleAdminStockJobs))
+			r.Get("/stock/symbols/{code}/holders", httpx.Wrap(s.handleAdminStockHolders))
 			r.Post("/stock/symbols/{code}/history", httpx.Wrap(s.handleAdminStockHistory))
 		})
 	})

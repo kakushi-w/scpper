@@ -1,16 +1,26 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { EmptyState, ErrorState, ListSkeleton, Panel, Section, StatTile } from "@/components/ui";
+import { EmptyState, ErrorState, ListSkeleton, Pager, Panel, Section, StatTile } from "@/components/ui";
 import { api } from "@/lib/api";
-import { formatDate, formatDateTime, formatNumber } from "@/lib/format";
-import type { AdminStockState, AdminTask, GachaParams, StockJob, StockParams } from "@/lib/types";
+import { coinReasonLabel, formatDate, formatDateTime, formatNumber, REASON_LABEL } from "@/lib/format";
+import type {
+  AdminLedger,
+  AdminStockState,
+  AdminTask,
+  GachaParams,
+  StockHolder,
+  StockJob,
+  StockParams,
+  TaskCompletions,
+} from "@/lib/types";
 
-type Tab = "overview" | "users" | "tasks" | "gacha" | "stock";
+type Tab = "overview" | "users" | "ledger" | "tasks" | "gacha" | "stock";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "overview", label: "概览" },
   { id: "users", label: "用户与云币" },
+  { id: "ledger", label: "资金流水" },
   { id: "tasks", label: "任务" },
   { id: "gacha", label: "抽卡" },
   { id: "stock", label: "股市调控" },
@@ -40,6 +50,7 @@ export function AdminView({ overview }: { overview: Record<string, number> }) {
 
       {tab === "overview" && <OverviewTab overview={overview} />}
       {tab === "users" && <UsersTab />}
+      {tab === "ledger" && <LedgerTab />}
       {tab === "tasks" && <TasksTab />}
       {tab === "gacha" && <GachaTab />}
       {tab === "stock" && <StockTab />}
@@ -77,13 +88,18 @@ function UsersTab() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
+  const [page, setPage] = useState(1);
+  const [pages, setPages] = useState(1);
+  const [open, setOpen] = useState<number | null>(null);
 
-  const load = useCallback(async (query: string) => {
+  const load = useCallback(async (query: string, p = 1) => {
     setLoading(true);
     setError("");
     try {
-      const res = await api.admin.users(query, 1, 50);
+      const res = await api.admin.users(query, p, 50);
       setUsers(res.items as unknown as AdminUser[]);
+      setPage(p);
+      setPages(Math.max(1, Math.ceil(res.meta.total / 50)));
     } catch (e) {
       setError(e instanceof Error ? e.message : "加载失败");
     } finally {
@@ -99,7 +115,7 @@ function UsersTab() {
     setError("");
     try {
       setMsg(await fn());
-      await load(q);
+      await load(q, page);
     } catch (e) {
       setError(e instanceof Error ? e.message : "操作失败");
     }
@@ -126,6 +142,19 @@ function UsersTab() {
     });
   }
 
+  function grantAll() {
+    const raw = window.prompt("请输入向所有未封禁用户发放的云币数量", "100");
+    if (!raw) return;
+    const delta = Number.parseInt(raw, 10);
+    if (!Number.isFinite(delta) || delta <= 0) return;
+    const memo = window.prompt("请输入备注，将记入每个人的收支记录", "") ?? "";
+    if (!window.confirm(`确定向所有未封禁用户各发放 ${formatNumber(delta)} 云币吗？`)) return;
+    void act(async () => {
+      const res = await api.admin.grantAll(delta, memo);
+      return `已向 ${formatNumber(res.users)} 人各发放 ${formatNumber(delta)} 云币`;
+    });
+  }
+
   function toggleAdmin(user: AdminUser) {
     const promote = user.role !== "admin";
     if (!window.confirm(promote ? `确定将 ${user.name} 设为管理员吗？` : `确定撤销 ${user.name} 的管理员身份吗？`)) return;
@@ -148,6 +177,9 @@ function UsersTab() {
         <button type="submit" className="sc-btn h-9 px-4 text-[13px]">
           搜索
         </button>
+        <button type="button" onClick={grantAll} className="sc-btn sc-btn-primary h-9 px-4 text-[13px]">
+          全员发放
+        </button>
       </form>
 
       {error && <ErrorState message={error} />}
@@ -164,14 +196,17 @@ function UsersTab() {
           </div>
         ) : users.length ? (
           users.map((u) => (
-            <div
-              key={u.id}
-              className="flex flex-wrap items-center gap-3 border-b px-3.5 py-3 last:border-b-0"
-              style={{ borderColor: "var(--sc-border)" }}
-            >
+            <div key={u.id} className="border-b last:border-b-0" style={{ borderColor: "var(--sc-border)" }}>
+            <div className="flex flex-wrap items-center gap-3 px-3.5 py-3">
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-[13.5px] font-semibold">{u.name}</span>
+                  <button
+                    type="button"
+                    className="text-[13.5px] font-semibold hover:underline"
+                    onClick={() => setOpen(open === u.id ? null : u.id)}
+                  >
+                    {u.name}
+                  </button>
                   {u.role === "admin" && <span className="sc-tag">管理员</span>}
                   {u.bannedAt && <span className="sc-tag">已封禁</span>}
                 </div>
@@ -194,11 +229,127 @@ function UsersTab() {
                 </button>
               </div>
             </div>
+            {open === u.id && (
+              <div className="border-t px-3.5 py-3" style={{ borderColor: "var(--sc-border)", background: "var(--sc-surface-2)" }}>
+                <LedgerList user={u.id} />
+              </div>
+            )}
+            </div>
           ))
         ) : (
           <EmptyState title="未找到匹配的用户" />
         )}
       </Panel>
+      <Pager page={page} pages={pages} onPage={(p) => void load(q, p)} />
+    </>
+  );
+}
+
+function LedgerTab() {
+  const [q, setQ] = useState("");
+  const [reason, setReason] = useState("");
+  const [applied, setApplied] = useState({ q: "", reason: "" });
+  return (
+    <>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          setApplied({ q, reason });
+        }}
+        className="mb-3 flex flex-wrap gap-2"
+      >
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="用户名" className="sc-input h-9 flex-1" />
+        <select value={reason} onChange={(e) => setReason(e.target.value)} className="sc-input h-9 w-40">
+          <option value="">全部类型</option>
+          {Object.entries(REASON_LABEL).map(([k, v]) => (
+            <option key={k} value={k}>
+              {v}
+            </option>
+          ))}
+        </select>
+        <button type="submit" className="sc-btn h-9 px-4 text-[13px]">
+          筛选
+        </button>
+      </form>
+      <Panel className="p-3">
+        <LedgerList q={applied.q} reason={applied.reason} showUser />
+      </Panel>
+    </>
+  );
+}
+
+function LedgerList({ user, q, reason, showUser }: { user?: number; q?: string; reason?: string; showUser?: boolean }) {
+  const [page, setPage] = useState(1);
+  const [data, setData] = useState<AdminLedger | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    setPage(1);
+  }, [user, q, reason]);
+
+  useEffect(() => {
+    let live = true;
+    setError("");
+    api.admin
+      .ledger({ user, q, reason }, page, 50)
+      .then((d) => live && setData(d))
+      .catch((e) => live && setError(e instanceof Error ? e.message : "加载失败"));
+    return () => {
+      live = false;
+    };
+  }, [user, q, reason, page]);
+
+  if (error) return <ErrorState message={error} />;
+  if (!data) return <ListSkeleton rows={4} />;
+  if (!data.items.length) return <EmptyState title="暂无收支记录" />;
+  return (
+    <>
+      <div className="mb-2 flex flex-wrap gap-4 text-[12px]" style={{ color: "var(--sc-text-2)" }}>
+        <span>共 {formatNumber(data.meta.total)} 条</span>
+        <span>
+          收入 <b className="sc-num">+{formatNumber(data.income)}</b>
+        </span>
+        <span>
+          支出 <b className="sc-num">{formatNumber(data.expense)}</b>
+        </span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="sc-table w-full text-[12px]">
+          <thead>
+            <tr>
+              <th>时间</th>
+              {showUser && <th>用户</th>}
+              <th>摘要</th>
+              <th>操作人</th>
+              <th className="text-right">变动</th>
+              <th className="text-right">结余</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.items.map((row) => (
+              <tr key={row.id}>
+                <td className="sc-num whitespace-nowrap">{formatDateTime(row.createdAt)}</td>
+                {showUser && <td>{row.name}</td>}
+                <td>
+                  {coinReasonLabel(row.reason)}
+                  {row.memo && (
+                    <div className="text-[11px]" style={{ color: "var(--sc-text-3)" }}>
+                      {row.memo}
+                    </div>
+                  )}
+                </td>
+                <td>{row.operator ?? ""}</td>
+                <td className="sc-num text-right">
+                  {row.delta > 0 ? "+" : ""}
+                  {formatNumber(row.delta)}
+                </td>
+                <td className="sc-num text-right">{formatNumber(row.balanceAfter)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <Pager page={page} pages={Math.max(1, Math.ceil(data.meta.total / 50))} onPage={setPage} />
     </>
   );
 }
@@ -267,6 +418,7 @@ function TasksTab() {
   const [draft, setDraft] = useState<AdminTask | null>(null);
   const [isNew, setIsNew] = useState(false);
   const [error, setError] = useState("");
+  const [open, setOpen] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -432,11 +584,8 @@ function TasksTab() {
       <Panel>
         {items.length ? (
           items.map((t) => (
-            <div
-              key={t.code}
-              className="flex flex-wrap items-center gap-3 border-b px-3.5 py-3 last:border-b-0"
-              style={{ borderColor: "var(--sc-border)" }}
-            >
+            <div key={t.code} className="border-b last:border-b-0" style={{ borderColor: "var(--sc-border)" }}>
+            <div className="flex flex-wrap items-center gap-3 px-3.5 py-3">
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-[13.5px] font-semibold">{t.title}</span>
@@ -460,12 +609,96 @@ function TasksTab() {
               >
                 编辑
               </button>
+              <button
+                type="button"
+                className="sc-btn h-8 px-2.5 text-[12px]"
+                onClick={() => setOpen(open === t.code ? null : t.code)}
+              >
+                完成情况
+              </button>
+            </div>
+            {open === t.code && (
+              <div className="border-t px-3.5 py-3" style={{ borderColor: "var(--sc-border)", background: "var(--sc-surface-2)" }}>
+                <Completions code={t.code} />
+              </div>
+            )}
             </div>
           ))
         ) : (
           <EmptyState title="暂无任务" />
         )}
       </Panel>
+    </>
+  );
+}
+
+function Completions({ code }: { code: string }) {
+  const [period, setPeriod] = useState("");
+  const [page, setPage] = useState(1);
+  const [data, setData] = useState<TaskCompletions | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let live = true;
+    api.admin
+      .taskCompletions(code, period, page, 50)
+      .then((d) => live && setData(d))
+      .catch((e) => live && setError(e instanceof Error ? e.message : "加载失败"));
+    return () => {
+      live = false;
+    };
+  }, [code, period, page]);
+
+  if (error) return <ErrorState message={error} />;
+  if (!data) return <ListSkeleton rows={3} />;
+  const periods = data.periods.some((p) => p.period === data.period)
+    ? data.periods
+    : [{ period: data.period, completed: 0, claimed: 0 }, ...data.periods];
+  const cur = periods.find((p) => p.period === data.period);
+  return (
+    <>
+      <div className="mb-2 flex flex-wrap items-center gap-3 text-[12px]">
+        <select
+          className="sc-input h-8 w-auto"
+          value={data.period}
+          onChange={(e) => {
+            setPeriod(e.target.value);
+            setPage(1);
+          }}
+        >
+          {periods.map((p) => (
+            <option key={p.period} value={p.period}>
+              {p.period}
+            </option>
+          ))}
+        </select>
+        <span style={{ color: "var(--sc-text-2)" }}>
+          完成 {formatNumber(cur?.completed ?? 0)} 人，已领取 {formatNumber(cur?.claimed ?? 0)} 人
+        </span>
+      </div>
+      {data.items.length ? (
+        <table className="sc-table w-full text-[12px]">
+          <thead>
+            <tr>
+              <th>用户</th>
+              <th>完成时间</th>
+              <th>领取时间</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.items.map((c) => (
+              <tr key={c.userId}>
+                <td>{c.name}</td>
+                <td className="sc-num">{c.completedAt ? formatDateTime(c.completedAt) : ""}</td>
+                <td className="sc-num">{c.claimedAt ? formatDateTime(c.claimedAt) : "未领取"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <EmptyState title="本期还没有人完成" />
+      )}
+      <Pager page={page} pages={Math.max(1, Math.ceil(data.meta.total / 50))} onPage={setPage} />
     </>
   );
 }
@@ -1078,6 +1311,12 @@ function StockTab() {
         )}
       </Section>
 
+      <Section title="持股人">
+        <Panel className="p-3">
+          <Holders code={symbol} />
+        </Panel>
+      </Section>
+
       {err && <ErrorState message={err} />}
       {msg && (
         <div
@@ -1091,6 +1330,69 @@ function StockTab() {
           {msg}
         </div>
       )}
+    </>
+  );
+}
+
+function Holders({ code }: { code: string }) {
+  const [page, setPage] = useState(1);
+  const [data, setData] = useState<{ items: StockHolder[]; meta: { total: number } } | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    setPage(1);
+  }, [code]);
+
+  useEffect(() => {
+    let live = true;
+    api.admin
+      .stockHolders(code, page, 50)
+      .then((d) => live && setData(d))
+      .catch((e) => live && setError(e instanceof Error ? e.message : "加载失败"));
+    return () => {
+      live = false;
+    };
+  }, [code, page]);
+
+  if (error) return <ErrorState message={error} />;
+  if (!data) return <ListSkeleton rows={3} />;
+  if (!data.items.length) return <EmptyState title="暂无持股人" />;
+  return (
+    <>
+      <div className="mb-2 text-[12px]" style={{ color: "var(--sc-text-2)" }}>
+        共 {formatNumber(data.meta.total)} 人
+      </div>
+      <div className="overflow-x-auto">
+        <table className="sc-table w-full text-[12px]">
+          <thead>
+            <tr>
+              <th>用户</th>
+              <th className="text-right">持股</th>
+              <th className="text-right">挂单冻结</th>
+              <th className="text-right">成本价</th>
+              <th className="text-right">市值</th>
+              <th className="text-right">保证金</th>
+              <th className="text-right">已实现盈亏</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.items.map((h) => (
+              <tr key={h.userId}>
+                <td>{h.name}</td>
+                <td className="sc-num text-right">{formatNumber(h.qty)}</td>
+                <td className="sc-num text-right">{h.lockedQty ? formatNumber(h.lockedQty) : ""}</td>
+                <td className="sc-num text-right">{h.avgCost.toFixed(2)}</td>
+                <td className="sc-num text-right">{formatNumber(h.value)}</td>
+                <td className="sc-num text-right">{h.margin ? formatNumber(h.margin) : ""}</td>
+                <td className="sc-num text-right" style={{ color: pctColor(h.realizedPnl) }}>
+                  {formatNumber(h.realizedPnl)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <Pager page={page} pages={Math.max(1, Math.ceil(data.meta.total / 50))} onPage={setPage} />
     </>
   );
 }

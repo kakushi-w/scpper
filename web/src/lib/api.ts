@@ -1,4 +1,5 @@
 import type {
+  AdminLedger,
   AdminStockState,
   AdminTask,
   Candle,
@@ -16,12 +17,14 @@ import type {
   SessionUser,
   Standing,
   StockAuction,
+  StockHolder,
   StockParams,
   StockPortfolio,
   StockQuote,
   StockSymbol,
   StockJob,
   StockTrade,
+  TaskCompletions,
   TasksResponse,
   WealthRankRow,
 } from "./types";
@@ -171,6 +174,14 @@ export const api = {
         method: "POST",
         body: { role, banned },
       }),
+    ledger: (f: { user?: number; q?: string; reason?: string }, p = 1, limit = 50) =>
+      request<AdminLedger>(`/api/admin/ledger${qs({ ...f, page: p, limit })}`),
+    grantAll: (delta: number, memo: string) =>
+      request<{ users: number }>("/api/admin/coins/grant-all", { method: "POST", body: { delta, memo } }),
+    taskCompletions: (code: string, period = "", p = 1, limit = 50) =>
+      request<TaskCompletions>(`/api/admin/tasks/${encodeURIComponent(code)}/completions${qs({ period, page: p, limit })}`),
+    stockHolders: (code: string, p = 1, limit = 50) =>
+      request<ListResponse<StockHolder>>(`/api/admin/stock/symbols/${code}/holders${qs({ page: p, limit })}`),
     tasks: () => request<{ items: AdminTask[] }>("/api/admin/tasks"),
     saveTask: (task: AdminTask) => request<AdminTask>("/api/admin/tasks", { method: "POST", body: task }),
     gacha: () => request<GachaParams>("/api/admin/gacha"),

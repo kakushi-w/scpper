@@ -37,7 +37,7 @@ export function articleHref(a: { page: string }): string {
   return "/" + a.page.split("/").map(encodeURIComponent).join("/");
 }
 
-const REASON_LABEL: Record<string, string> = {
+export const REASON_LABEL: Record<string, string> = {
   task: "任务奖励",
   admin_grant: "管理员发放",
   admin_clear: "管理员清空",
